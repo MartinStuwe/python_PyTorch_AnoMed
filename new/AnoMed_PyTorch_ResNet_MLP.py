@@ -3,7 +3,6 @@ import time
 from PIL import Image
 from io import BytesIO
 
-
 import numpy as np
 
 import torch
@@ -17,54 +16,25 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-
 from torchvision import transforms, models
 
 from datasets import load_dataset
 
+import torch.nn.init as init
 
-torch.manual_seed(0)
-
-
-# Define custom transform
-custom_transform = transforms.Compose([
-    transforms.CenterCrop((178, 178)),
-    transforms.Resize((128, 128)),
-    transforms.ToTensor()
-])
-
-
-class CelebADataset(Dataset):
-    def __init__(self, images, targets, transform=None):
-        self.images = images  # List of image paths or byte data dictionaries
-        self.targets = targets  # Corresponding targets
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        image_data = self.images[idx]
-
-        if isinstance(image_data, dict):  # If image data is stored as a dict (e.g., {'bytes': ...})
-            img_bytes = image_data['bytes']
-            image = Image.open(BytesIO(img_bytes))
-        else:  # Otherwise, assume it's a file path
-            image = Image.open(image_data)
-
-        if self.transform:
-            image = self.transform(image)
-
-        target = self.targets[idx]
-        return image, target
-
-def setup_ddp(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
-
-def cleanup_ddp():
-    dist.destroy_process_group()
+def initialize_weights_he(m):
+    """
+    Initialize the weights of Linear layers using He (Kaiming) Normal Initialization
+    suitable for LeakyReLU activations.
+    """
+    if isinstance(m, nn.Linear):
+        # He (Kaiming) Normal Initialization for weights
+        if m.bias is not None:
+            init.zeros_(m.bias)
+        if m.out_features == 1:
+            init.xavier_normal_(m.weight)
+        else:
+            init.kaiming_normal_(m.weight, a=0.01, mode='fan_in', nonlinearity='leaky_relu')
 
 class SimpleMLP(nn.Module):
     def __init__(self, input_dim=40):
@@ -196,211 +166,354 @@ class CombinedModel(nn.Module):
         output = self.mlp(resnet_output)
         return output
 
-def train_ddp(rank, world_size, train_inputs, train_targets, val_inputs, val_targets, num_epochs=100, batch_size=1024):
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-        setup_ddp(rank, world_size)
-        device = torch.device(f'cuda:{rank}')
+def setup_ddp(rank, world_size):
+    """
+    Initializes the distributed environment.
+    """
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'  # Ensure this port is free
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
 
-        # Load pre-trained ResNet model and freeze its parameters
-        resnet_model = models.resnet18(pretrained=True)
+def cleanup_ddp():
+    """
+    Destroys the distributed environment.
+    """
+    dist.destroy_process_group()
 
+# Define custom dataset and DataLoader
+class CelebADataset(Dataset):
+    def __init__(self, images, targets, transform=None):
+        self.images = images  # List of image paths or byte data dictionaries
+        self.targets = targets  # Corresponding targets
+        self.transform = transform
 
-        # Modify the final layer of ResNet to output 40 attributes
-        num_features = resnet_model.fc.in_features
-        resnet_model.fc = nn.Linear(num_features, 40)
-        for param in resnet_model.parameters():
-            param.requires_grad = False
-        resnet_model = resnet_model.to(device)
+    def __len__(self):
+        return len(self.images)
 
-        # Convert ResNet model to DDP
-        #NOTE: has no required gradients, but not usable for this, got an error 
-        # i.e. RuntimeError: DistributedDataParallel is not needed when a module doesn't have any parameter that requires a gradient. 
-        #resnet_model = DDP(resnet_model, device_ids=[rank])
+    def __getitem__(self, idx):
+        image_data = self.images[idx]
 
-        # Load pre-trained ResNet state dict
-        checkpoint = torch.load("../trained/AnoMed/resnet_model.pth", weights_only=True)
-        # Remove 'module.' from the keys in state_dict
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint.items():
-            if k.startswith('module.'):
-                new_state_dict[k[7:]] = v  # Remove 'module.' prefix
-            else:
-                new_state_dict[k] = v
-        resnet_model.load_state_dict(new_state_dict)
+        if isinstance(image_data, dict):  # If image data is stored as a dict (e.g., {'bytes': ...})
+            img_bytes = image_data['bytes']
+            image = Image.open(BytesIO(img_bytes)).convert('RGB')
+        else:  # Otherwise, assume it's a file path
+            image = Image.open(image_data).convert('RGB')
 
-        # Create SimpleMLP model and convert to DDP
-        mlp = SimpleMLP().to(device)
-        mlp = DDP(mlp, device_ids=[rank])
+        if self.transform:
+            image = self.transform(image)
 
-        # Load pre-trained MLP state dict
-        mlp_checkpoint = torch.load("../trained/AnoMed/mlp_attractive.pth", weights_only=True)
-        mlp.load_state_dict(mlp_checkpoint)
+        target = self.targets[idx]
+        return image, target
 
-        # Combine ResNet and MLP into a single model
-        combined_model = CombinedModel(resnet_model, mlp).to(device)
-        combined_model = DDP(combined_model, device_ids=[rank])
+def train_ddp(rank, world_size, train_inputs, train_targets, val_inputs, val_targets, input_dim=40, num_epochs=20, batch_size=16):
+    """
+    Train a Combined ResNet and MLP model using Distributed Data Parallel (DDP).
 
-        # Loss function and optimizer
-        criterion = nn.BCEWithLogitsLoss()
-        optimizer = optim.AdamW(mlp.parameters(), lr=1e-3, weight_decay=1e-1)
-        scheduler = ExponentialLR(optimizer, gamma=0.95)
+    Args:
+        rank (int): Rank of the current process.
+        world_size (int): Total number of processes.
+        train_inputs (list or array): Training input data (image paths or byte data).
+        train_targets (torch.Tensor): Training targets.
+        val_inputs (list or array): Validation input data (image paths or byte data).
+        val_targets (torch.Tensor): Validation targets.
+        input_dim (int, optional): Input dimension for the MLP. Defaults to 40.
+        num_epochs (int, optional): Number of training epochs. Defaults to 20.
+        batch_size (int, optional): Batch size per process. Defaults to 512.
+    """
+    # Initialize the process group for DDP
+    setup_ddp(rank, world_size)
+    
+    # Set seeds for reproducibility
+    torch.manual_seed(0)
+    np.random.seed(0)
+    import random
+    random.seed(0)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
-        # Create Dataset and DataLoader with DistributedSampler
-        train_dataset = CelebADataset(train_inputs, train_targets, transform=custom_transform)
+    device = torch.device(f'cuda:{rank}')
+
+    # Define transformations for the dataset
+    custom_transform = transforms.Compose([
+        transforms.CenterCrop((178, 178)),
+        transforms.Resize((128, 128)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Using ImageNet stats
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    print(f"Rank {rank}: Loading data...")
+
+    # Prepare training dataset and sampler
+    train_dataset = CelebADataset(train_inputs, train_targets, transform=custom_transform)
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=4, pin_memory=True)
+
+    # Prepare validation dataset and loader only for rank 0
+    if rank == 0:
         val_dataset = CelebADataset(val_inputs, val_targets, transform=custom_transform)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    else:
+        val_loader = None
 
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-        val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank)
+    print(f"Rank {rank}: Data loaded successfully.")
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=3)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=3)
-        # 2-4*#GPU
-            
-        # Initialize the TensorBoard writer only for rank 0
-        if rank == 0:
-            writer = SummaryWriter(log_dir="./tensorboard_logs")
+    # Load a pre-trained ResNet-18 model and modify the final layer
+    resnet_model = models.resnet18(pretrained=True)
+    num_features = resnet_model.fc.in_features
+    resnet_model.fc = nn.Linear(num_features, 40)  # Adjust for 40 attributes
+
+    # Initialize the new fully connected layer
+    resnet_model.load_state_dict(torch.load("../trained/ResNet_models/resnet_model_epoch_6.pth"))  # Load your pretrained weights
+
+    # Move the ResNet model to the appropriate device and freeze its parameters
+    resnet_model = resnet_model.to(device)
+    resnet_model.eval()  # Freeze ResNet during training
+    for param in resnet_model.parameters():
+        param.requires_grad = False
+
+    # Create SimpleMLP model and initialize weights
+    mlp = SimpleMLP(input_dim=input_dim).to(device)
+    mlp.apply(initialize_weights_he)
+
+    # Wrap the MLP model with DDP
+    mlp = DDP(mlp, device_ids=[rank])
+
+    # Combine ResNet and MLP into a single model
+    combined_model = CombinedModel(resnet_model, mlp).to(device)
+    combined_model = DDP(combined_model, device_ids=[rank])
+
+    # Define loss function, optimizer, and scheduler
+    criterion = nn.BCEWithLogitsLoss()
+    optimizer = optim.AdamW(mlp.parameters(), lr=1e-3, weight_decay=1e-2)  # Adjusted learning rate and weight decay
+    scheduler = ExponentialLR(optimizer, gamma=0.95)  # Revert to ExponentialLR with desired gamma
+
+    # Ensure the save directory exists (only on rank 0)
+    if rank == 0:
+        os.makedirs('../trained/Combined_models/', exist_ok=True)
+
+    # Initialize SummaryWriter only on rank 0
+    if rank == 0:
+        writer = SummaryWriter(log_dir="./tensorboard_logs/combined/")
+        print(f"Training samples: {len(train_dataset)}, Validation samples: {len(val_dataset)}")
+        print(f"Number of batches per epoch (training): {len(train_loader)}")
+        print(f"Number of batches per epoch (validation): {len(val_loader)}")
+
+    print(f"Rank {rank}: Starting training...")
+
     # Training loop
     for epoch in range(num_epochs):
         combined_model.train()
-        train_sampler.set_epoch(epoch)  # Set sampler for each epoch
+        train_sampler.set_epoch(epoch)  # Shuffle data differently each epoch
 
-        # Reset accumulators
-        total_train_loss = 0
-        total_val_loss = 0
+        # Reset training accumulators
+        total_train_loss = 0.0
         correct_predictions_train = 0
         total_predictions_train = 0
-        correct_predictions_val = 0
-        total_predictions_val = 0
 
-        train_iter = iter(train_loader)
-        val_iter = iter(val_loader)
-
-        for batch_idx, (batch_inputs, batch_targets) in enumerate(train_iter):
-            batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
+        for batch_idx, (images, targets) in enumerate(train_loader):
+            images, targets = images.to(device), targets.to(device)
 
             optimizer.zero_grad()
-
-            outputs = combined_model(batch_inputs).view(-1, 1)
-
-            loss = criterion(outputs, batch_targets)
+            outputs = combined_model(images).view(-1, 1)
+            loss = criterion(outputs, targets)
             loss.backward()
-
+            torch.nn.utils.clip_grad_norm_(mlp.parameters(), max_norm=1.0)  # Optional: Gradient clipping
             optimizer.step()
-            total_train_loss += loss.item()
 
-            # Calculate train accuracy for this batch
-            predictions_train = torch.sigmoid(outputs)
-            predicted_labels_train = (predictions_train > 0.5).float()
-            correct_predictions_train += (predicted_labels_train == batch_targets).sum().item()
-            total_predictions_train += batch_targets.size(0)
+            # Accumulate training loss and accuracy
+            total_train_loss += loss.item() * images.size(0)  # Multiply by batch size
+            predictions = torch.sigmoid(outputs)
+            predicted_labels = (predictions > 0.5).float()
+            correct_predictions_train += (predicted_labels == targets).sum().item()
+            total_predictions_train += targets.numel()
 
-            # Evaluation step after each training batch
-            combined_model.eval()  # Switch to eval mode
+        # Compute local training loss and accuracy
+        avg_train_loss = total_train_loss / len(train_loader.dataset)
+        train_accuracy = correct_predictions_train / total_predictions_train
+
+        # Aggregate training metrics across all processes
+        train_loss_tensor = torch.tensor([avg_train_loss], dtype=torch.float32, device=device)
+        train_accuracy_tensor = torch.tensor([train_accuracy], dtype=torch.float32, device=device)
+        dist.all_reduce(train_loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(train_accuracy_tensor, op=dist.ReduceOp.SUM)
+
+        global_avg_train_loss = train_loss_tensor.item() / world_size
+        global_train_accuracy = train_accuracy_tensor.item() / world_size
+
+        # Validation phase handled only by rank 0
+        if rank == 0 and val_loader is not None:
+            combined_model.eval()
+
+            # Reset validation accumulators
+            total_val_loss = 0.0
+            correct_predictions_val = 0
+            total_predictions_val = 0
 
             with torch.no_grad():
-                try:
-                    val_inputs, val_targets = next(val_iter)
-                except StopIteration:
-                    val_iter = iter(val_loader)  # Reset if exhausted
-                    val_inputs, val_targets = next(val_iter)
+                for val_images, val_targets in val_loader:
+                    val_images, val_targets = val_images.to(device), val_targets.to(device)
+                    val_outputs = combined_model(val_images).view(-1, 1)
+                    val_loss = criterion(val_outputs, val_targets)
+                    total_val_loss += val_loss.item() * val_images.size(0)  # Multiply by batch size
 
-                val_inputs, val_targets = val_inputs.to(device), val_targets.to(device)
-                val_outputs = combined_model(val_inputs).view(-1, 1)
-                val_loss = criterion(val_outputs, val_targets)
-                total_val_loss += val_loss.item()
+                    # Calculate validation accuracy
+                    val_predictions = torch.sigmoid(val_outputs)
+                    val_predicted_labels = (val_predictions > 0.5).float()
+                    correct_predictions_val += (val_predicted_labels == val_targets).sum().item()
+                    total_predictions_val += val_targets.numel()
 
-                # Calculate validation accuracy for this batch
-                predictions_val = torch.sigmoid(val_outputs)
-                predicted_labels_val = (predictions_val > 0.5).float()
-                correct_predictions_val += (predicted_labels_val == val_targets).sum().item()
-                total_predictions_val += val_targets.size(0)
-
-            combined_model.train()  # Switch back to training mode
-
-        avg_train_loss = total_train_loss / len(train_loader)
-        avg_val_loss = total_val_loss / len(val_loader)
-
-        if rank == 0:
-            print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
-            train_accuracy = correct_predictions_train / total_predictions_train
+            # Compute average validation loss and accuracy
+            avg_val_loss = total_val_loss / len(val_loader.dataset)
             val_accuracy = correct_predictions_val / total_predictions_val
-            print(f"Train Acc: {train_accuracy:.4f}")
-            print(f"Eval Acc: {val_accuracy:.4f}")
 
-            writer.add_scalar('Loss/Train', avg_train_loss, epoch)
-            writer.add_scalar('Loss/Val', avg_val_loss, epoch)
-            writer.add_scalar('Accuracy/Train', train_accuracy, epoch)
-            writer.add_scalar('Accuracy/Val', val_accuracy, epoch)
+            # Logging and printing
+            print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {global_avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, "
+                  f"Train Acc: {global_train_accuracy:.4f}, Val Acc: {val_accuracy:.4f}")
 
+            # Log metrics to TensorBoard
+            writer.add_scalar("Loss/Train", global_avg_train_loss, epoch)
+            writer.add_scalar("Loss/Val", avg_val_loss, epoch)
+            writer.add_scalar("Accuracy/Train", global_train_accuracy, epoch)
+            writer.add_scalar("Accuracy/Val", val_accuracy, epoch)
+            writer.add_scalar("Learning Rate", scheduler.get_last_lr()[0], epoch)
+
+            # Save the model checkpoint after each epoch
+            model_save_path = f'../trained/Combined_models/combined_model_epoch_{epoch+1}.pth'
+            torch.save(combined_model.module.state_dict(), model_save_path)
+            print(f"Model saved to {model_save_path}")
+        elif rank == 0:
+            # If there's no validation loader, still log training metrics
+            print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {global_avg_train_loss:.4f}, Train Accuracy: {global_train_accuracy:.4f}")
+            writer.add_scalar("Loss/Train", global_avg_train_loss, epoch)
+            writer.add_scalar("Accuracy/Train", global_train_accuracy, epoch)
+            writer.add_scalar("Learning Rate", scheduler.get_last_lr()[0], epoch)
+
+        # Scheduler step
         scheduler.step()
 
+    # Save the final model and cleanup
     if rank == 0:
         writer.close()
-        torch.save(combined_model.state_dict(), '../trained/combined_model.pth')
+        # Save the final model after all epochs
+        final_model_save_path = '../trained/Combined_models/combined_model_final.pth'
+        torch.save(combined_model.module.state_dict(), final_model_save_path)
+        print(f"Final model saved to {final_model_save_path}")
 
-cleanup_ddp()
+    # Cleanup the DDP process group
+    cleanup_ddp()
 
+# NOTE: Uses test set, avoid peeking at results until end!
+def evaluate_model(test_inputs, test_targets, input_dim=None):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Define transformations consistent with training
+    custom_transform = transforms.Compose([
+        transforms.CenterCrop((178, 178)),
+        transforms.Resize((128, 128)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Using ImageNet stats
+                             std=[0.229, 0.224, 0.225])
+    ])
+    
+    # Initialize the models
+    # Load ResNet
+    resnet_model = models.resnet18(pretrained=True)
+    num_features = resnet_model.fc.in_features
+    resnet_model.fc = nn.Linear(num_features, 40)  # Adjust for 40 attributes
+    resnet_model.fc.apply(initialize_weights_he)
+    resnet_model = resnet_model.to(device)
+    resnet_model.eval()
+    for param in resnet_model.parameters():
+        param.requires_grad = False
 
+    # Load MLP
+    mlp = SimpleMLP(input_dim=input_dim).to(device)
+    mlp.apply(initialize_weights_he)
+    mlp = DDP(mlp, device_ids=[0])  # Dummy wrap for compatibility
 
+    # Combine models
+    combined_model = CombinedModel(resnet_model, mlp).to(device)
+    combined_model = DDP(combined_model, device_ids=[0])  # Dummy wrap for compatibility
+
+    # Load the final trained model
+    combined_model.module.load_state_dict(torch.load('../trained/Combined_models/combined_model_final.pth'))
+    combined_model.eval()
+
+    # Create test dataset and loader
+    test_dataset = CelebADataset(test_inputs, test_targets, transform=custom_transform)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=4, pin_memory=True)
+
+    criterion = nn.BCEWithLogitsLoss()
+
+    total_test_loss = 0.0
+    correct_predictions_test = 0
+    total_predictions_test = 0
+
+    with torch.no_grad():
+        for test_images, test_targets_batch in test_loader:
+            test_images, test_targets_batch = test_images.to(device), test_targets_batch.to(device)
+            test_outputs = combined_model(test_images).view(-1, 1)
+            test_loss = criterion(test_outputs, test_targets_batch)
+            total_test_loss += test_loss.item() * test_images.size(0)  # Multiply by batch size
+
+            # Calculate test accuracy
+            test_predictions = torch.sigmoid(test_outputs)
+            test_predicted_labels = (test_predictions > 0.5).float()
+            correct_predictions_test += (test_predicted_labels == test_targets_batch).sum().item()
+            total_predictions_test += test_targets_batch.numel()
+
+    avg_test_loss = total_test_loss / len(test_loader.dataset)
+    test_accuracy = correct_predictions_test / total_predictions_test
+
+    print(f"Test Loss: {avg_test_loss:.4f}, Test Acc: {test_accuracy:.4f}")
 
 def main():
-    world_size = torch.cuda.device_count()
-    print(f"Using {world_size} GPUs")
+    #world_size = torch.cuda.device_count()
+    world_size=1
+    if world_size < 2:
+        print(f"Warning: Detected {world_size} GPU(s). The script is configured for {world_size} GPU(s).")
+    
+    print(f"Using {world_size} GPU(s) for training.")
 
+    # Load dataset
     data_dir = "../data"
     celeba = load_dataset("tpremoli/CelebA-attrs", split="all", cache_dir=data_dir)
-    
     df = celeba.to_pandas()
     attr_names = df.columns[1:-1]
     image_col_name = df.columns[0]
-    
-    inputs = df[image_col_name].values
     attributes = df[attr_names].values.astype(np.float32)
+    inputs = df[image_col_name].values
     targets = (attributes + 1) / 2  # Normalize to 0,1
-    
+
+    # Select the attribute to predict
     attr_to_predict = 'Attractive'
     attr_idx = list(attr_names).index(attr_to_predict)
-    
-    train_inputs = inputs[:int(0.8 * len(inputs))]
-    train_targets = torch.tensor(targets[:int(0.8 * len(inputs)), attr_idx].reshape(-1, 1), dtype=torch.float32)
-    val_inputs = inputs[int(0.8 * len(inputs)):]
-    val_targets = torch.tensor(targets[int(0.8 * len(inputs)):, attr_idx].reshape(-1, 1), dtype=torch.float32)
 
+    # Split data into training, validation, and test sets
+    train_percentage = 0.8
+    val_percentage = 0.1
+    test_percentage = 1 - train_percentage - val_percentage
+    training_amount = int(train_percentage * len(inputs))
+    validation_amount = int(val_percentage * len(inputs))
 
+    train_inputs = inputs[:training_amount]
+    train_targets = torch.tensor(targets[:training_amount, attr_idx].reshape(-1, 1), dtype=torch.float32)
+    val_inputs = inputs[training_amount:training_amount + validation_amount]
+    val_targets = torch.tensor(targets[training_amount:training_amount + validation_amount, attr_idx].reshape(-1, 1), dtype=torch.float32)
+    test_inputs = inputs[training_amount + validation_amount:]
+    test_targets = torch.tensor(targets[training_amount + validation_amount:, attr_idx].reshape(-1, 1), dtype=torch.float32)
+
+    # Use multiprocessing spawn for DDP
     mp.spawn(train_ddp,
-             args=(world_size, train_inputs, train_targets, val_inputs, val_targets),
+             args=(world_size, train_inputs, train_targets, val_inputs, val_targets, 40, 20, 16),  # input_dim=40, num_epochs=20, batch_size=512
              nprocs=world_size,
              join=True)
 
+    # NOTE: AT END: Evaluate on the test set after training
+    # Uncomment the following line when you're ready to evaluate
+    # evaluate_model(test_inputs, test_targets, input_dim=40)
+
 if __name__ == "__main__":
     mp.set_start_method('spawn')
-
     main()
-
-"""
-Batch [140], Train Accuracy: 0.8372, Eval Accuracy: 0.8243
-Batch [141], Train Accuracy: 0.8372, Eval Accuracy: 0.8243
-Batch [142], Train Accuracy: 0.8371, Eval Accuracy: 0.8243
-Batch [143], Train Accuracy: 0.8371, Eval Accuracy: 0.8244
-Batch [144], Train Accuracy: 0.8372, Eval Accuracy: 0.8245
-Batch [145], Train Accuracy: 0.8371, Eval Accuracy: 0.8243
-Batch [146], Train Accuracy: 0.8370, Eval Accuracy: 0.8242
-Batch [147], Train Accuracy: 0.8370, Eval Accuracy: 0.8245
-Batch [148], Train Accuracy: 0.8369, Eval Accuracy: 0.8245
-Batch [149], Train Accuracy: 0.8369, Eval Accuracy: 0.8244
-Batch [150], Train Accuracy: 0.8369, Eval Accuracy: 0.8246
-Batch [151], Train Accuracy: 0.8367, Eval Accuracy: 0.8246
-Batch [152], Train Accuracy: 0.8369, Eval Accuracy: 0.8245
-Batch [153], Train Accuracy: 0.8370, Eval Accuracy: 0.8243
-Batch [154], Train Accuracy: 0.8370, Eval Accuracy: 0.8245
-Batch [155], Train Accuracy: 0.8370, Eval Accuracy: 0.8246
-Batch [156], Train Accuracy: 0.8369, Eval Accuracy: 0.8248
-Batch [157], Train Accuracy: 0.8366, Eval Accuracy: 0.8246
-Batch [158], Train Accuracy: 0.8366, Eval Accuracy: 0.8245
-Batch [159], Train Accuracy: 0.8366, Eval Accuracy: 0.8246
-Epoch [5/5], Train Loss: 0.3405, Val Loss: 1.4406
-"""
-# NOTE: ACC fuer alle Daten
-
-#TODO: PDF verfassen

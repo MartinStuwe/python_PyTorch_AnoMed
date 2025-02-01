@@ -1,0 +1,715 @@
+\documentclass{article}
+\usepackage{comment}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{times}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{siunitx}
+\sisetup{output-exponent-marker=\ensuremath{\mathrm{e}}}
+
+\author{Martin Stuwe}
+\title{AnoMed Report: MLP Classifier, ResNet Classifier, ResNet Embedding + MLP Classifier}
+\begin{document}
+\maketitle
+\section{Introduction}
+We train an MLP consisting of 11 hidden linear layers followed by LeakyReLU activation neurons with a slope of 0.01, batch normalization and skip connections on the CelebA dataset,
+where we use 39 of the binary attributes as input and aim to predict one target attribute.
+Since the target attribute values are binary, the chosen loss function for all our models is the binary cross entropy loss with logits.
+We further fine-tune a pre-trained ResNet-18 by replacing the fully connected layer and training it, to, given images from the CelebA dataset, learn a representation s.t. it is able to reconstruct all attributes from it.
+The output of the fully connected layer in our trained ResNet-18 serves as a learned representation of attributes from images.
+Then we freeze our fine-tuned ResNet-18 model and add the same MLP architecture as mentioned before,
+resulting in a combined model.
+In the combined model we retrain the complete MLP, but keep the weights of the ResNet-18 layers of our combined network frozen.
+All our models were initialized with the Kaiming normal initializer with $a=0.01$ except the last layers which were initialized with Xavier normal initialization and for reproducibility we set the seeds to zero.
+\begin{comment}
+\section{Training}
+We train a Multilayer Perceptron (MLP) to classify CelebA attributes.
+Further we train a Residual Network (ResNet) which gets as input data, Celeb-A images of celebrity faces.
+This ResNet targets to learn all Celeb-A attributes.
+
+After training the ResNet we freeze it and use its latents i.e. the output of the last hidden layer as a representation.
+The latents are fed to our pre-trained MLP
+\end{comment}
+
+\section{Training \& Evaluation}
+% Retrained:
+\subsection{MLP}
+As optimizer we chose adaptive moment estimation with decoupled weight decay (AdamW),
+with exponential decay rate for the first moment $\beta_1=0.9$, exponential decay rate for the second moment $\beta_2= 0.999$,
+numerical stability constant $\epsilon =$ \num{1e-8}, weight decay $\lambda=$ \num{1e-2} and learning rate $\eta=$ \num{1e-3}.
+For the learning rate we further make use of exponential learning rate scheduling with the decay factor $\gamma=0.95$.
+The model is trained for 100 epochs with a batch size of 16.
+\begin{longtable}{c c c c c}
+    \caption{MLP Training and Validation Results}\\
+    \hline
+    \textbf{Epoch} & \textbf{Train Loss} & \textbf{Val Loss} & \textbf{Train Acc} & \textbf{Eval Acc} \\
+    \hline
+    \endfirsthead
+    
+    \multicolumn{5}{l}{\small\itshape Continued from previous page}\\
+    \hline
+    \textbf{Epoch} & \textbf{Train Loss} & \textbf{Val Loss} & \textbf{Train Acc} & \textbf{Eval Acc} \\
+    \hline
+    \endhead
+    
+    \hline \multicolumn{5}{r}{\small\itshape Continued on next page}\\
+    \endfoot
+    
+    \hline
+    \endlastfoot
+    1  & 0.4733 & 0.4494 & 0.7703 & 0.7895 \\
+    2  & 0.4599 & 0.4570 & 0.7797 & 0.7882 \\
+    3  & 0.4533 & 0.4565 & 0.7839 & 0.7783 \\
+    4  & 0.4496 & 0.4646 & 0.7861 & 0.7869 \\
+    5  & 0.4474 & 0.4555 & 0.7863 & 0.7808 \\
+    6  & 0.4455 & 0.4524 & 0.7875 & 0.7851 \\
+    7  & 0.4443 & 0.4564 & 0.7882 & 0.7879 \\
+    8  & 0.4431 & 0.4554 & 0.7883 & 0.7879 \\
+    9  & 0.4423 & 0.4561 & 0.7889 & 0.7874 \\
+    10 & 0.4409 & 0.4602 & 0.7900 & 0.7877 \\
+    11 & 0.4404 & 0.4506 & 0.7904 & 0.7885 \\
+    12 & 0.4401 & 0.4639 & 0.7902 & 0.7881 \\
+    13 & 0.4394 & 0.4562 & 0.7900 & 0.7883 \\
+    14 & 0.4391 & 0.4524 & 0.7907 & 0.7888 \\
+    15 & 0.4387 & 0.4490 & 0.7911 & 0.7879 \\
+    16 & 0.4377 & 0.4497 & 0.7909 & 0.7876 \\
+    17 & 0.4372 & 0.4537 & 0.7918 & 0.7888 \\
+    18 & 0.4367 & 0.4501 & 0.7916 & 0.7863 \\
+    19 & 0.4365 & 0.4545 & 0.7924 & 0.7894 \\
+    20 & 0.4358 & 0.4556 & 0.7928 & 0.7899 \\
+    21 & 0.4359 & 0.4527 & 0.7931 & 0.7888 \\
+    22 & 0.4354 & 0.4533 & 0.7930 & 0.7885 \\
+    23 & 0.4349 & 0.4619 & 0.7929 & 0.7896 \\
+    24 & 0.4338 & 0.4613 & 0.7933 & 0.7888 \\
+    25 & 0.4341 & 0.4551 & 0.7934 & 0.7897 \\
+    26 & 0.4338 & 0.4573 & 0.7933 & 0.7894 \\
+    27 & 0.4335 & 0.4641 & 0.7930 & 0.7898 \\
+    28 & 0.4333 & 0.4704 & 0.7929 & 0.7878 \\
+    29 & 0.4334 & 0.4530 & 0.7934 & 0.7899 \\
+    30 & 0.4326 & 0.4580 & 0.7936 & 0.7902 \\
+    31 & 0.4320 & 0.4606 & 0.7939 & 0.7886 \\
+    32 & 0.4322 & 0.4568 & 0.7952 & 0.7890 \\
+    33 & 0.4316 & 0.4637 & 0.7940 & 0.7884 \\
+    34 & 0.4316 & 0.4566 & 0.7943 & 0.7898 \\
+    35 & 0.4314 & 0.4575 & 0.7941 & 0.7889 \\
+    36 & 0.4307 & 0.4573 & 0.7946 & 0.7885 \\
+    37 & 0.4312 & 0.4654 & 0.7949 & 0.7850 \\
+    38 & 0.4297 & 0.4568 & 0.7951 & 0.7893 \\
+    39 & 0.4301 & 0.4609 & 0.7947 & 0.7872 \\
+    40 & 0.4303 & 0.4629 & 0.7954 & 0.7887 \\
+    41 & 0.4300 & 0.4580 & 0.7955 & 0.7900 \\
+    42 & 0.4299 & 0.4545 & 0.7958 & 0.7897 \\
+    43 & 0.4291 & 0.4568 & 0.7956 & \bf{0.7917} \\
+    44 & 0.4297 & 0.4577 & 0.7961 & 0.7916 \\
+    45 & 0.4286 & 0.4638 & 0.7957 & 0.7917 \\
+    46 & 0.4289 & 0.4500 & 0.7965 & 0.7905 \\
+    47 & 0.4281 & 0.4537 & 0.7964 & 0.7910 \\
+    48 & 0.4273 & 0.4588 & 0.7962 & 0.7894 \\
+    49 & 0.4283 & 0.4517 & 0.7959 & 0.7913 \\
+    50 & 0.4276 & 0.4564 & 0.7964 & 0.7903 \\
+    51 & 0.4273 & 0.4529 & 0.7969 & 0.7899 \\
+    52 & 0.4280 & 0.4568 & 0.7965 & 0.7896 \\
+    53 & 0.4281 & 0.4558 & 0.7968 & 0.7915 \\
+    54 & 0.4275 & 0.4552 & 0.7968 & 0.7906 \\
+    55 & 0.4269 & 0.4591 & 0.7974 & 0.7896 \\
+    56 & 0.4270 & 0.4574 & 0.7973 & 0.7889 \\
+    57 & 0.4272 & 0.4502 & 0.7969 & 0.7905 \\
+    58 & 0.4270 & 0.4496 & 0.7968 & 0.7910 \\
+    59 & 0.4270 & 0.4533 & 0.7968 & 0.7905 \\
+    60 & 0.4268 & 0.4487 & 0.7974 & 0.7898 \\
+    61 & 0.4261 & 0.4543 & 0.7979 & 0.7898 \\
+    62 & 0.4263 & 0.4590 & 0.7974 & 0.7910 \\
+    63 & 0.4265 & 0.4519 & 0.7975 & 0.7895 \\
+    64 & 0.4261 & 0.4528 & 0.7978 & 0.7902 \\
+    65 & 0.4260 & 0.4480 & 0.7975 & 0.7906 \\
+    66 & 0.4260 & 0.4521 & 0.7972 & 0.7897 \\
+    67 & 0.4256 & 0.4543 & 0.7969 & 0.7914 \\
+    68 & 0.4257 & 0.4547 & 0.7987 & 0.7885 \\
+    69 & 0.4261 & 0.4648 & 0.7971 & 0.7892 \\
+    70 & 0.4256 & 0.4552 & 0.7974 & 0.7908 \\
+    71 & 0.4256 & 0.4499 & 0.7978 & 0.7897 \\
+    72 & 0.4257 & 0.4554 & 0.7980 & 0.7892 \\
+    73 & 0.4251 & 0.4509 & 0.7972 & 0.7901 \\
+    74 & 0.4256 & 0.4578 & 0.7973 & 0.7900 \\
+    75 & 0.4247 & 0.4510 & 0.7984 & 0.7901 \\
+    76 & 0.4251 & 0.4486 & 0.7976 & 0.7885 \\
+    77 & 0.4254 & 0.4523 & 0.7975 & 0.7915 \\
+    78 & 0.4247 & 0.4532 & 0.7976 & 0.7899 \\
+    79 & 0.4252 & 0.4507 & 0.7975 & 0.7895 \\
+    80 & 0.4247 & 0.4485 & 0.7982 & 0.7903 \\
+    81 & 0.4250 & 0.4503 & 0.7978 & 0.7904 \\
+    82 & 0.4253 & 0.4556 & 0.7980 & 0.7896 \\
+    83 & 0.4245 & 0.4553 & 0.7984 & 0.7898 \\
+    84 & 0.4244 & 0.4524 & 0.7986 & 0.7900 \\
+    85 & 0.4249 & 0.4521 & 0.7984 & 0.7900 \\
+    86 & 0.4246 & 0.4533 & 0.7980 & 0.7892 \\
+    87 & 0.4243 & 0.4546 & 0.7976 & 0.7891 \\
+    88 & 0.4240 & 0.4531 & 0.7980 & 0.7888 \\
+    89 & 0.4244 & 0.4512 & 0.7986 & 0.7900 \\
+    90 & 0.4244 & 0.4471 & 0.7988 & 0.7901 \\
+    91 & 0.4248 & 0.4569 & 0.7988 & 0.7902 \\
+    92 & 0.4249 & 0.4557 & 0.7985 & 0.7908 \\
+    93 & 0.4241 & 0.4590 & 0.7986 & 0.7883 \\
+    94 & 0.4243 & 0.4548 & 0.7980 & 0.7891 \\
+    95 & 0.4243 & 0.4530 & 0.7987 & 0.7899 \\
+    96 & 0.4245 & 0.4574 & 0.7988 & 0.7896 \\
+    97 & 0.4239 & 0.4530 & 0.7985 & 0.7887 \\
+    98 & 0.4250 & 0.4537 & 0.7981 & 0.7900 \\
+    99 & 0.4241 & 0.4515 & 0.7984 & 0.7905 \\
+    100 & 0.4244 & 0.4482 & 0.7984 & 0.7900 \\
+    \end{longtable}
+
+
+\begin{comment}   
+
+/nfshome/stuwe/dev/anomed/python_PyTorch_AnoMed/conda/lib/python3.12/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 20 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+Using 2 GPUs
+Amount of samples in training dataset: 162079
+Amount of samples in validation dataset: 20260
+Amount of batches per epoch (training): 5065
+Amount of batches per epoch (validation): 1267
+Epoch [1/100], Train Loss: 0.4733, Val Loss: 0.4494
+Train Acc: 0.7703, Val Acc: 0.7895
+Model saved to ../trained/MLP_models/MLP_model_epoch_1.pth
+Epoch [2/100], Train Loss: 0.4599, Val Loss: 0.4570
+Train Acc: 0.7797, Val Acc: 0.7882
+Model saved to ../trained/MLP_models/MLP_model_epoch_2.pth
+Epoch [3/100], Train Loss: 0.4533, Val Loss: 0.4565
+Train Acc: 0.7839, Val Acc: 0.7783
+Model saved to ../trained/MLP_models/MLP_model_epoch_3.pth
+Epoch [4/100], Train Loss: 0.4496, Val Loss: 0.4646
+Train Acc: 0.7861, Val Acc: 0.7869
+Model saved to ../trained/MLP_models/MLP_model_epoch_4.pth
+Epoch [5/100], Train Loss: 0.4474, Val Loss: 0.4555
+Train Acc: 0.7863, Val Acc: 0.7808
+Model saved to ../trained/MLP_models/MLP_model_epoch_5.pth
+Epoch [6/100], Train Loss: 0.4455, Val Loss: 0.4524
+Train Acc: 0.7875, Val Acc: 0.7851
+Model saved to ../trained/MLP_models/MLP_model_epoch_6.pth
+Epoch [7/100], Train Loss: 0.4443, Val Loss: 0.4564
+Train Acc: 0.7882, Val Acc: 0.7879
+Model saved to ../trained/MLP_models/MLP_model_epoch_7.pth
+Epoch [8/100], Train Loss: 0.4431, Val Loss: 0.4554
+Train Acc: 0.7883, Val Acc: 0.7879
+Model saved to ../trained/MLP_models/MLP_model_epoch_8.pth
+Epoch [9/100], Train Loss: 0.4423, Val Loss: 0.4561
+Train Acc: 0.7889, Val Acc: 0.7874
+Model saved to ../trained/MLP_models/MLP_model_epoch_9.pth
+Epoch [10/100], Train Loss: 0.4409, Val Loss: 0.4602
+Train Acc: 0.7900, Val Acc: 0.7877
+Model saved to ../trained/MLP_models/MLP_model_epoch_10.pth
+Epoch [11/100], Train Loss: 0.4404, Val Loss: 0.4506
+Train Acc: 0.7904, Val Acc: 0.7885
+Model saved to ../trained/MLP_models/MLP_model_epoch_11.pth
+Epoch [12/100], Train Loss: 0.4401, Val Loss: 0.4639
+Train Acc: 0.7902, Val Acc: 0.7881
+Model saved to ../trained/MLP_models/MLP_model_epoch_12.pth
+Epoch [13/100], Train Loss: 0.4394, Val Loss: 0.4562
+Train Acc: 0.7900, Val Acc: 0.7883
+Model saved to ../trained/MLP_models/MLP_model_epoch_13.pth
+Epoch [14/100], Train Loss: 0.4391, Val Loss: 0.4524
+Train Acc: 0.7907, Val Acc: 0.7888
+Model saved to ../trained/MLP_models/MLP_model_epoch_14.pth
+Epoch [15/100], Train Loss: 0.4387, Val Loss: 0.4490
+Train Acc: 0.7911, Val Acc: 0.7879
+Model saved to ../trained/MLP_models/MLP_model_epoch_15.pth
+Epoch [16/100], Train Loss: 0.4377, Val Loss: 0.4497
+Train Acc: 0.7909, Val Acc: 0.7876
+Model saved to ../trained/MLP_models/MLP_model_epoch_16.pth
+Epoch [17/100], Train Loss: 0.4372, Val Loss: 0.4537
+Train Acc: 0.7918, Val Acc: 0.7888
+Model saved to ../trained/MLP_models/MLP_model_epoch_17.pth
+Epoch [18/100], Train Loss: 0.4367, Val Loss: 0.4501
+Train Acc: 0.7916, Val Acc: 0.7863
+Model saved to ../trained/MLP_models/MLP_model_epoch_18.pth
+Epoch [19/100], Train Loss: 0.4365, Val Loss: 0.4545
+Train Acc: 0.7924, Val Acc: 0.7894
+Model saved to ../trained/MLP_models/MLP_model_epoch_19.pth
+Epoch [20/100], Train Loss: 0.4358, Val Loss: 0.4556
+Train Acc: 0.7928, Val Acc: 0.7899
+Model saved to ../trained/MLP_models/MLP_model_epoch_20.pth
+Epoch [21/100], Train Loss: 0.4359, Val Loss: 0.4527
+Train Acc: 0.7931, Val Acc: 0.7888
+Model saved to ../trained/MLP_models/MLP_model_epoch_21.pth
+Epoch [22/100], Train Loss: 0.4354, Val Loss: 0.4533
+Train Acc: 0.7930, Val Acc: 0.7885
+Model saved to ../trained/MLP_models/MLP_model_epoch_22.pth
+Epoch [23/100], Train Loss: 0.4349, Val Loss: 0.4619
+Train Acc: 0.7929, Val Acc: 0.7896
+Model saved to ../trained/MLP_models/MLP_model_epoch_23.pth
+Epoch [24/100], Train Loss: 0.4338, Val Loss: 0.4613
+Train Acc: 0.7933, Val Acc: 0.7888
+Model saved to ../trained/MLP_models/MLP_model_epoch_24.pth
+Epoch [25/100], Train Loss: 0.4341, Val Loss: 0.4551
+Train Acc: 0.7934, Val Acc: 0.7897
+Model saved to ../trained/MLP_models/MLP_model_epoch_25.pth
+Epoch [26/100], Train Loss: 0.4338, Val Loss: 0.4573
+Train Acc: 0.7933, Val Acc: 0.7894
+Model saved to ../trained/MLP_models/MLP_model_epoch_26.pth
+Epoch [27/100], Train Loss: 0.4335, Val Loss: 0.4641
+Train Acc: 0.7930, Val Acc: 0.7898
+Model saved to ../trained/MLP_models/MLP_model_epoch_27.pth
+Epoch [28/100], Train Loss: 0.4333, Val Loss: 0.4704
+Train Acc: 0.7929, Val Acc: 0.7878
+Model saved to ../trained/MLP_models/MLP_model_epoch_28.pth
+Epoch [29/100], Train Loss: 0.4334, Val Loss: 0.4530
+Train Acc: 0.7934, Val Acc: 0.7899
+Model saved to ../trained/MLP_models/MLP_model_epoch_29.pth
+Epoch [30/100], Train Loss: 0.4326, Val Loss: 0.4580
+Train Acc: 0.7936, Val Acc: 0.7902
+Model saved to ../trained/MLP_models/MLP_model_epoch_30.pth
+Epoch [31/100], Train Loss: 0.4320, Val Loss: 0.4606
+Train Acc: 0.7939, Val Acc: 0.7886
+Model saved to ../trained/MLP_models/MLP_model_epoch_31.pth
+Epoch [32/100], Train Loss: 0.4322, Val Loss: 0.4568
+Train Acc: 0.7952, Val Acc: 0.7890
+Model saved to ../trained/MLP_models/MLP_model_epoch_32.pth
+Epoch [33/100], Train Loss: 0.4316, Val Loss: 0.4637
+Train Acc: 0.7940, Val Acc: 0.7884
+Model saved to ../trained/MLP_models/MLP_model_epoch_33.pth
+Epoch [34/100], Train Loss: 0.4316, Val Loss: 0.4566
+Train Acc: 0.7943, Val Acc: 0.7898
+Model saved to ../trained/MLP_models/MLP_model_epoch_34.pth
+Epoch [35/100], Train Loss: 0.4314, Val Loss: 0.4575
+Train Acc: 0.7941, Val Acc: 0.7889
+Model saved to ../trained/MLP_models/MLP_model_epoch_35.pth
+Epoch [36/100], Train Loss: 0.4307, Val Loss: 0.4573
+Train Acc: 0.7946, Val Acc: 0.7885
+Model saved to ../trained/MLP_models/MLP_model_epoch_36.pth
+Epoch [37/100], Train Loss: 0.4312, Val Loss: 0.4654
+Train Acc: 0.7949, Val Acc: 0.7850
+Model saved to ../trained/MLP_models/MLP_model_epoch_37.pth
+Epoch [38/100], Train Loss: 0.4297, Val Loss: 0.4568
+Train Acc: 0.7951, Val Acc: 0.7893
+Model saved to ../trained/MLP_models/MLP_model_epoch_38.pth
+Epoch [39/100], Train Loss: 0.4301, Val Loss: 0.4609
+Train Acc: 0.7947, Val Acc: 0.7872
+Model saved to ../trained/MLP_models/MLP_model_epoch_39.pth
+Epoch [40/100], Train Loss: 0.4303, Val Loss: 0.4629
+Train Acc: 0.7954, Val Acc: 0.7887
+Model saved to ../trained/MLP_models/MLP_model_epoch_40.pth
+Epoch [41/100], Train Loss: 0.4300, Val Loss: 0.4580
+Train Acc: 0.7955, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_41.pth
+Epoch [42/100], Train Loss: 0.4299, Val Loss: 0.4545
+Train Acc: 0.7958, Val Acc: 0.7897
+Model saved to ../trained/MLP_models/MLP_model_epoch_42.pth
+Epoch [43/100], Train Loss: 0.4291, Val Loss: 0.4568
+Train Acc: 0.7956, Val Acc: 0.7917
+Model saved to ../trained/MLP_models/MLP_model_epoch_43.pth
+Epoch [44/100], Train Loss: 0.4297, Val Loss: 0.4577
+Train Acc: 0.7961, Val Acc: 0.7916
+Model saved to ../trained/MLP_models/MLP_model_epoch_44.pth
+Epoch [45/100], Train Loss: 0.4286, Val Loss: 0.4638
+Train Acc: 0.7957, Val Acc: 0.7917
+Model saved to ../trained/MLP_models/MLP_model_epoch_45.pth
+Epoch [46/100], Train Loss: 0.4289, Val Loss: 0.4500
+Train Acc: 0.7965, Val Acc: 0.7905
+Model saved to ../trained/MLP_models/MLP_model_epoch_46.pth
+Epoch [47/100], Train Loss: 0.4281, Val Loss: 0.4537
+Train Acc: 0.7964, Val Acc: 0.7910
+Model saved to ../trained/MLP_models/MLP_model_epoch_47.pth
+Epoch [48/100], Train Loss: 0.4273, Val Loss: 0.4588
+Train Acc: 0.7962, Val Acc: 0.7894
+Model saved to ../trained/MLP_models/MLP_model_epoch_48.pth
+Epoch [49/100], Train Loss: 0.4283, Val Loss: 0.4517
+Train Acc: 0.7959, Val Acc: 0.7913
+Model saved to ../trained/MLP_models/MLP_model_epoch_49.pth
+Epoch [50/100], Train Loss: 0.4276, Val Loss: 0.4564
+Train Acc: 0.7964, Val Acc: 0.7903
+Model saved to ../trained/MLP_models/MLP_model_epoch_50.pth
+Epoch [51/100], Train Loss: 0.4273, Val Loss: 0.4529
+Train Acc: 0.7969, Val Acc: 0.7899
+Model saved to ../trained/MLP_models/MLP_model_epoch_51.pth
+Epoch [52/100], Train Loss: 0.4280, Val Loss: 0.4568
+Train Acc: 0.7965, Val Acc: 0.7896
+Model saved to ../trained/MLP_models/MLP_model_epoch_52.pth
+Epoch [53/100], Train Loss: 0.4281, Val Loss: 0.4558
+Train Acc: 0.7968, Val Acc: 0.7915
+Model saved to ../trained/MLP_models/MLP_model_epoch_53.pth
+Epoch [54/100], Train Loss: 0.4275, Val Loss: 0.4552
+Train Acc: 0.7968, Val Acc: 0.7906
+Model saved to ../trained/MLP_models/MLP_model_epoch_54.pth
+Epoch [55/100], Train Loss: 0.4269, Val Loss: 0.4591
+Train Acc: 0.7974, Val Acc: 0.7896
+Model saved to ../trained/MLP_models/MLP_model_epoch_55.pth
+Epoch [56/100], Train Loss: 0.4270, Val Loss: 0.4574
+Train Acc: 0.7973, Val Acc: 0.7889
+Model saved to ../trained/MLP_models/MLP_model_epoch_56.pth
+Epoch [57/100], Train Loss: 0.4272, Val Loss: 0.4502
+Train Acc: 0.7969, Val Acc: 0.7905
+Model saved to ../trained/MLP_models/MLP_model_epoch_57.pth
+Epoch [58/100], Train Loss: 0.4270, Val Loss: 0.4496
+Train Acc: 0.7968, Val Acc: 0.7910
+Model saved to ../trained/MLP_models/MLP_model_epoch_58.pth
+Epoch [59/100], Train Loss: 0.4270, Val Loss: 0.4533
+Train Acc: 0.7968, Val Acc: 0.7905
+Model saved to ../trained/MLP_models/MLP_model_epoch_59.pth
+Epoch [60/100], Train Loss: 0.4268, Val Loss: 0.4487
+Train Acc: 0.7974, Val Acc: 0.7898
+Model saved to ../trained/MLP_models/MLP_model_epoch_60.pth
+Epoch [61/100], Train Loss: 0.4261, Val Loss: 0.4543
+Train Acc: 0.7979, Val Acc: 0.7898
+Model saved to ../trained/MLP_models/MLP_model_epoch_61.pth
+Epoch [62/100], Train Loss: 0.4263, Val Loss: 0.4590
+Train Acc: 0.7974, Val Acc: 0.7910
+Model saved to ../trained/MLP_models/MLP_model_epoch_62.pth
+Epoch [63/100], Train Loss: 0.4265, Val Loss: 0.4519
+Train Acc: 0.7975, Val Acc: 0.7895
+Model saved to ../trained/MLP_models/MLP_model_epoch_63.pth
+Epoch [64/100], Train Loss: 0.4261, Val Loss: 0.4528
+Train Acc: 0.7978, Val Acc: 0.7902
+Model saved to ../trained/MLP_models/MLP_model_epoch_64.pth
+Epoch [65/100], Train Loss: 0.4260, Val Loss: 0.4480
+Train Acc: 0.7975, Val Acc: 0.7906
+Model saved to ../trained/MLP_models/MLP_model_epoch_65.pth
+Epoch [66/100], Train Loss: 0.4260, Val Loss: 0.4521
+Train Acc: 0.7972, Val Acc: 0.7897
+Model saved to ../trained/MLP_models/MLP_model_epoch_66.pth
+Epoch [67/100], Train Loss: 0.4256, Val Loss: 0.4543
+Train Acc: 0.7969, Val Acc: 0.7914
+Model saved to ../trained/MLP_models/MLP_model_epoch_67.pth
+Epoch [68/100], Train Loss: 0.4257, Val Loss: 0.4547
+Train Acc: 0.7987, Val Acc: 0.7885
+Model saved to ../trained/MLP_models/MLP_model_epoch_68.pth
+Epoch [69/100], Train Loss: 0.4261, Val Loss: 0.4648
+Train Acc: 0.7971, Val Acc: 0.7892
+Model saved to ../trained/MLP_models/MLP_model_epoch_69.pth
+Epoch [70/100], Train Loss: 0.4256, Val Loss: 0.4552
+Train Acc: 0.7974, Val Acc: 0.7908
+Model saved to ../trained/MLP_models/MLP_model_epoch_70.pth
+Epoch [71/100], Train Loss: 0.4256, Val Loss: 0.4499
+Train Acc: 0.7978, Val Acc: 0.7897
+Model saved to ../trained/MLP_models/MLP_model_epoch_71.pth
+Epoch [72/100], Train Loss: 0.4257, Val Loss: 0.4554
+Train Acc: 0.7980, Val Acc: 0.7892
+Model saved to ../trained/MLP_models/MLP_model_epoch_72.pth
+Epoch [73/100], Train Loss: 0.4251, Val Loss: 0.4509
+Train Acc: 0.7972, Val Acc: 0.7901
+Model saved to ../trained/MLP_models/MLP_model_epoch_73.pth
+Epoch [74/100], Train Loss: 0.4256, Val Loss: 0.4578
+Train Acc: 0.7973, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_74.pth
+Epoch [75/100], Train Loss: 0.4247, Val Loss: 0.4510
+Train Acc: 0.7984, Val Acc: 0.7901
+Model saved to ../trained/MLP_models/MLP_model_epoch_75.pth
+Epoch [76/100], Train Loss: 0.4251, Val Loss: 0.4486
+Train Acc: 0.7976, Val Acc: 0.7885
+Model saved to ../trained/MLP_models/MLP_model_epoch_76.pth
+Epoch [77/100], Train Loss: 0.4254, Val Loss: 0.4523
+Train Acc: 0.7975, Val Acc: 0.7915
+Model saved to ../trained/MLP_models/MLP_model_epoch_77.pth
+Epoch [78/100], Train Loss: 0.4247, Val Loss: 0.4532
+Train Acc: 0.7976, Val Acc: 0.7899
+Model saved to ../trained/MLP_models/MLP_model_epoch_78.pth
+Epoch [79/100], Train Loss: 0.4252, Val Loss: 0.4507
+Train Acc: 0.7975, Val Acc: 0.7895
+Model saved to ../trained/MLP_models/MLP_model_epoch_79.pth
+Epoch [80/100], Train Loss: 0.4247, Val Loss: 0.4485
+Train Acc: 0.7982, Val Acc: 0.7903
+Model saved to ../trained/MLP_models/MLP_model_epoch_80.pth
+Epoch [81/100], Train Loss: 0.4250, Val Loss: 0.4503
+Train Acc: 0.7978, Val Acc: 0.7904
+Model saved to ../trained/MLP_models/MLP_model_epoch_81.pth
+Epoch [82/100], Train Loss: 0.4253, Val Loss: 0.4556
+Train Acc: 0.7980, Val Acc: 0.7896
+Model saved to ../trained/MLP_models/MLP_model_epoch_82.pth
+Epoch [83/100], Train Loss: 0.4245, Val Loss: 0.4553
+Train Acc: 0.7984, Val Acc: 0.7898
+Model saved to ../trained/MLP_models/MLP_model_epoch_83.pth
+Epoch [84/100], Train Loss: 0.4244, Val Loss: 0.4524
+Train Acc: 0.7986, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_84.pth
+Epoch [85/100], Train Loss: 0.4249, Val Loss: 0.4521
+Train Acc: 0.7984, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_85.pth
+Epoch [86/100], Train Loss: 0.4246, Val Loss: 0.4533
+Train Acc: 0.7980, Val Acc: 0.7892
+Model saved to ../trained/MLP_models/MLP_model_epoch_86.pth
+Epoch [87/100], Train Loss: 0.4243, Val Loss: 0.4546
+Train Acc: 0.7976, Val Acc: 0.7891
+Model saved to ../trained/MLP_models/MLP_model_epoch_87.pth
+Epoch [88/100], Train Loss: 0.4240, Val Loss: 0.4531
+Train Acc: 0.7980, Val Acc: 0.7888
+Model saved to ../trained/MLP_models/MLP_model_epoch_88.pth
+Epoch [89/100], Train Loss: 0.4244, Val Loss: 0.4512
+Train Acc: 0.7986, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_89.pth
+Epoch [90/100], Train Loss: 0.4244, Val Loss: 0.4471
+Train Acc: 0.7988, Val Acc: 0.7901
+Model saved to ../trained/MLP_models/MLP_model_epoch_90.pth
+Epoch [91/100], Train Loss: 0.4248, Val Loss: 0.4569
+Train Acc: 0.7988, Val Acc: 0.7902
+Model saved to ../trained/MLP_models/MLP_model_epoch_91.pth
+Epoch [92/100], Train Loss: 0.4249, Val Loss: 0.4557
+Train Acc: 0.7985, Val Acc: 0.7908
+Model saved to ../trained/MLP_models/MLP_model_epoch_92.pth
+Epoch [93/100], Train Loss: 0.4241, Val Loss: 0.4590
+Train Acc: 0.7986, Val Acc: 0.7883
+Model saved to ../trained/MLP_models/MLP_model_epoch_93.pth
+Epoch [94/100], Train Loss: 0.4243, Val Loss: 0.4548
+Train Acc: 0.7980, Val Acc: 0.7891
+Model saved to ../trained/MLP_models/MLP_model_epoch_94.pth
+Epoch [95/100], Train Loss: 0.4243, Val Loss: 0.4530
+Train Acc: 0.7987, Val Acc: 0.7899
+Model saved to ../trained/MLP_models/MLP_model_epoch_95.pth
+Epoch [96/100], Train Loss: 0.4245, Val Loss: 0.4574
+Train Acc: 0.7988, Val Acc: 0.7896
+Model saved to ../trained/MLP_models/MLP_model_epoch_96.pth
+Epoch [97/100], Train Loss: 0.4239, Val Loss: 0.4530
+Train Acc: 0.7985, Val Acc: 0.7887
+Model saved to ../trained/MLP_models/MLP_model_epoch_97.pth
+Epoch [98/100], Train Loss: 0.4250, Val Loss: 0.4537
+Train Acc: 0.7981, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_98.pth
+Epoch [99/100], Train Loss: 0.4241, Val Loss: 0.4515
+Train Acc: 0.7984, Val Acc: 0.7905
+Model saved to ../trained/MLP_models/MLP_model_epoch_99.pth
+Epoch [100/100], Train Loss: 0.4244, Val Loss: 0.4482
+Train Acc: 0.7984, Val Acc: 0.7900
+Model saved to ../trained/MLP_models/MLP_model_epoch_100.pth
+Final model saved to ../trained/MLP_models/MLP_model_final.pth
+\end{comment}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{ResNet Image Encoder for all Classes}
+As optimizer we chose adaptive moment estimation with decoupled weight decay (AdamW),
+with exponential decay rate for the first moment $\beta_1=0.9$, exponential decay rate for the second moment $\beta_2= 0.999$,
+numerical stability constant $\epsilon =$ \num{1e-8}, weight decay $\lambda=$ \num{1e-2} and learning rate $\eta=$ \num{1e-3}.
+We also utilize an exponential learning rate scheduler with $\gamma=0.95$. 
+The model is trained for 20 epochs with a batch size of 16.
+\begin{table}[H]
+    \centering
+    \caption{ResNet Image Encoder Training and Evaluation Results}
+    \begin{tabular}{c|c|c|c|c}
+    \hline
+    \textbf{Epoch} & \textbf{Train Loss} & \textbf{Eval Loss} & \textbf{Train Acc} & \textbf{Eval Acc} \\
+    \hline
+    1  & 0.2368 & 0.2155 & 0.8964 & 0.9055 \\
+    2  & 0.2048 & 0.2024 & 0.9098 & 0.9109 \\
+    3  & 0.1943 & 0.1975 & 0.9144 & 0.9132 \\
+    4  & 0.1868 & 0.1943 & 0.9177 & 0.9135 \\
+    5  & 0.1803 & 0.2055 & 0.9206 & 0.9090 \\
+    6  & 0.1736 & 0.1910 & 0.9236 & \bf{0.9160} \\
+    7  & 0.1670 & 0.1932 & 0.9267 & 0.9150 \\
+    8  & 0.1599 & 0.1951 & 0.9299 & 0.9148 \\
+    9  & 0.1526 & 0.1958 & 0.9335 & 0.9153 \\
+    10 & 0.1453 & 0.2023 & 0.9368 & 0.9140 \\
+    11 & 0.1379 & 0.2058 & 0.9403 & 0.9129 \\
+    12 & 0.1305 & 0.2089 & 0.9439 & 0.9119 \\
+    13 & 0.1233 & 0.2158 & 0.9474 & 0.9102 \\
+    14 & 0.1163 & 0.2223 & 0.9506 & 0.9095 \\
+    15 & 0.1095 & 0.2281 & 0.9538 & 0.9111 \\
+    16 & 0.1031 & 0.2338 & 0.9568 & 0.9080 \\
+    17 & 0.0968 & 0.2396 & 0.9597 & 0.9088 \\
+    18 & 0.0908 & 0.2445 & 0.9625 & 0.9089 \\
+    19 & 0.0851 & 0.2519 & 0.9650 & 0.9087 \\
+    20 & 0.0798 & 0.2605 & 0.9675 & 0.9081 \\
+    \hline
+    \end{tabular}
+    \end{table}
+
+
+% New with He init:
+\begin{comment}
+=1 TORCH_USE_CUDA_DSA=1 python AnoMed_PyTorch_ResNet.py
+Warning: Detected 1 GPU(s). The script is configured for 2 GPUs.
+Using 1 GPU(s) for training.
+[W1222 02:08:41.926786691 Utils.hpp:164] Warning: Environment variable NCCL_BLOCKING_WAIT is deprecated; use TORCH_NCCL_BLOCKING_WAIT instead (function operator())
+Rank 0: Loading data...
+Rank 0: Data loaded successfully.
+pc03:4011673:4011673 [0] NCCL INFO Bootstrap : Using enp0s31f6:141.83.113.203<0>
+pc03:4011673:4011673 [0] NCCL INFO NET/Plugin : dlerror=libnccl-net.so: cannot open shared object file: No such file or directory No plugin found (libnccl-net.so), using internal implementation
+pc03:4011673:4011673 [0] NCCL INFO cudaDriverVersion 12020
+NCCL version 2.20.5+cuda12.1
+pc03:4011673:4011712 [0] NCCL INFO NET/IB : No device found.
+pc03:4011673:4011712 [0] NCCL INFO NET/Socket : Using [0]enp0s31f6:141.83.113.203<0>
+pc03:4011673:4011712 [0] NCCL INFO Using non-device net plugin version 0
+pc03:4011673:4011712 [0] NCCL INFO Using network Socket
+pc03:4011673:4011712 [0] NCCL INFO comm 0x4acf3f00 rank 0 nranks 1 cudaDev 0 nvmlDev 1 busId 2000 commId 0x18b3d0fb2835f908 - Init START
+pc03:4011673:4011712 [0] NCCL INFO comm 0x4acf3f00 rank 0 nRanks 1 nNodes 1 localRanks 1 localRank 0 MNNVL 0
+pc03:4011673:4011712 [0] NCCL INFO Channel 00/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 01/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 02/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 03/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 04/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 05/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 06/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 07/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 08/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 09/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 10/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 11/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 12/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 13/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 14/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 15/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 16/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 17/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 18/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 19/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 20/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 21/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 22/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 23/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 24/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 25/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 26/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 27/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 28/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 29/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 30/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Channel 31/32 :    0
+pc03:4011673:4011712 [0] NCCL INFO Trees [0] -1/-1/-1->0->-1 [1] -1/-1/-1->0->-1 [2] -1/-1/-1->0->-1 [3] -1/-1/-1->0->-1 [4] -1/-1/-1->0->-1 [5] -1/-1/-1->0->-1 [6] -1/-1/-1->0->-1 [7] -1/-1/-1->0->-1 [8] -1/-1/-1->0->-1 [9] -1/-1/-1->0->-1 [10] -1/-1/-1->0->-1 [11] -1/-1/-1->0->-1 [12] -1/-1/-1->0->-1 [13] -1/-1/-1->0->-1 [14] -1/-1/-1->0->-1 [15] -1/-1/-1->0->-1 [16] -1/-1/-1->0->-1 [17] -1/-1/-1->0->-1 [18] -1/-1/-1->0->-1 [19] -1/-1/-1->0->-1 [20] -1/-1/-1->0->-1 [21] -1/-1/-1->0->-1 [22] -1/-1/-1->0->-1 [23] -1/-1/-1->0->-1 [24] -1/-1/-1->0->-1 [25] -1/-1/-1->0->-1 [26] -1/-1/-1->0->-1 [27] -1/-1/-1->0->-1 [28] -1/-1/-1->0->-1 [29] -1/-1/-1->0->-1 [30] -1/-1/-1->0->-1 [31] -1/-1/-1->0->-1
+pc03:4011673:4011712 [0] NCCL INFO P2P Chunksize set to 131072
+pc03:4011673:4011712 [0] NCCL INFO Connected all rings
+pc03:4011673:4011712 [0] NCCL INFO Connected all trees
+pc03:4011673:4011712 [0] NCCL INFO 32 coll channels, 0 collnet channels, 0 nvls channels, 32 p2p channels, 32 p2p channels per peer
+pc03:4011673:4011712 [0] NCCL INFO comm 0x4acf3f00 rank 0 nranks 1 cudaDev 0 nvmlDev 1 busId 2000 commId 0x18b3d0fb2835f908 - Init COMPLETE
+[rank0]:[W1222 02:08:42.530515791 Utils.hpp:110] Warning: Environment variable NCCL_BLOCKING_WAIT is deprecated; use TORCH_NCCL_BLOCKING_WAIT instead (function operator())
+Training samples: 162079, Validation samples: 20260
+Number of batches per epoch (training): 20260
+Number of batches per epoch (validation): 2533
+Rank 0: Starting training...
+Epoch [1/20], Train Loss: 0.2368, Eval Loss: 0.2155, Train Acc: 0.8964, Eval Acc: 0.9055
+Model saved to ../trained/ResNet_models/resnet_model_epoch_1.pth
+Epoch [2/20], Train Loss: 0.2048, Eval Loss: 0.2024, Train Acc: 0.9098, Eval Acc: 0.9109
+Model saved to ../trained/ResNet_models/resnet_model_epoch_2.pth
+Epoch [3/20], Train Loss: 0.1943, Eval Loss: 0.1975, Train Acc: 0.9144, Eval Acc: 0.9132
+Model saved to ../trained/ResNet_models/resnet_model_epoch_3.pth
+Epoch [4/20], Train Loss: 0.1868, Eval Loss: 0.1943, Train Acc: 0.9177, Eval Acc: 0.9135
+Model saved to ../trained/ResNet_models/resnet_model_epoch_4.pth
+Epoch [5/20], Train Loss: 0.1803, Eval Loss: 0.2055, Train Acc: 0.9206, Eval Acc: 0.9090
+Model saved to ../trained/ResNet_models/resnet_model_epoch_5.pth
+Epoch [6/20], Train Loss: 0.1736, Eval Loss: 0.1910, Train Acc: 0.9236, Eval Acc: 0.9160
+Model saved to ../trained/ResNet_models/resnet_model_epoch_6.pth
+Epoch [7/20], Train Loss: 0.1670, Eval Loss: 0.1932, Train Acc: 0.9267, Eval Acc: 0.9150
+Model saved to ../trained/ResNet_models/resnet_model_epoch_7.pth
+Epoch [8/20], Train Loss: 0.1599, Eval Loss: 0.1951, Train Acc: 0.9299, Eval Acc: 0.9148
+Model saved to ../trained/ResNet_models/resnet_model_epoch_8.pth
+Epoch [9/20], Train Loss: 0.1526, Eval Loss: 0.1958, Train Acc: 0.9335, Eval Acc: 0.9153
+Model saved to ../trained/ResNet_models/resnet_model_epoch_9.pth
+Epoch [10/20], Train Loss: 0.1453, Eval Loss: 0.2023, Train Acc: 0.9368, Eval Acc: 0.9140
+Model saved to ../trained/ResNet_models/resnet_model_epoch_10.pth
+Epoch [11/20], Train Loss: 0.1379, Eval Loss: 0.2058, Train Acc: 0.9403, Eval Acc: 0.9129
+Model saved to ../trained/ResNet_models/resnet_model_epoch_11.pth
+Epoch [12/20], Train Loss: 0.1305, Eval Loss: 0.2089, Train Acc: 0.9439, Eval Acc: 0.9119
+Model saved to ../trained/ResNet_models/resnet_model_epoch_12.pth
+Epoch [13/20], Train Loss: 0.1233, Eval Loss: 0.2158, Train Acc: 0.9474, Eval Acc: 0.9102
+Model saved to ../trained/ResNet_models/resnet_model_epoch_13.pth
+Epoch [14/20], Train Loss: 0.1163, Eval Loss: 0.2223, Train Acc: 0.9506, Eval Acc: 0.9095
+Model saved to ../trained/ResNet_models/resnet_model_epoch_14.pth
+Epoch [15/20], Train Loss: 0.1095, Eval Loss: 0.2281, Train Acc: 0.9538, Eval Acc: 0.9111
+Model saved to ../trained/ResNet_models/resnet_model_epoch_15.pth
+Epoch [16/20], Train Loss: 0.1031, Eval Loss: 0.2338, Train Acc: 0.9568, Eval Acc: 0.9080
+Model saved to ../trained/ResNet_models/resnet_model_epoch_16.pth
+Epoch [17/20], Train Loss: 0.0968, Eval Loss: 0.2396, Train Acc: 0.9597, Eval Acc: 0.9088
+Model saved to ../trained/ResNet_models/resnet_model_epoch_17.pth
+Epoch [18/20], Train Loss: 0.0908, Eval Loss: 0.2445, Train Acc: 0.9625, Eval Acc: 0.9089
+Model saved to ../trained/ResNet_models/resnet_model_epoch_18.pth
+Epoch [19/20], Train Loss: 0.0851, Eval Loss: 0.2519, Train Acc: 0.9650, Eval Acc: 0.9087
+Model saved to ../trained/ResNet_models/resnet_model_epoch_19.pth
+Epoch [20/20], Train Loss: 0.0798, Eval Loss: 0.2605, Train Acc: 0.9675, Eval Acc: 0.9081
+Model saved to ../trained/ResNet_models/resnet_model_epoch_20.pth
+Final model saved to ../trained/ResNet_models/resnet_model_final.pth
+pc03:4011673:4011713 [0] NCCL INFO [Service thread] Connection closed by localRank 0
+\end{comment}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Index fight
+
+\subsection{Frozen ResNet Encoder with MLP head}
+%Adversary allows continous numbers, more general
+We choose the trained ResNet from the 6th epoch and attach an MLP head. 
+To optimize the parameters of our ResNet + MLP network we chose adaptive moment estimation with decoupled weight decay (AdamW),
+with exponential decay rate for the first moment $\beta_1=0.9$, exponential decay rate for the second moment $\beta_2= 0.999$,
+numerical stability constant $\epsilon =$ \num{1e-8}, weight decay $\lambda=$ \num{1e-2} and learning rate $\eta=$ \num{1e-3}.
+For the combined model we also utilize an exponential learning rate scheduler with $\gamma=0.95$. 
+The combined model is trained for 20 epochs with a batch size of 16.
+\begin{table}[h!]
+    \centering
+    \caption{ResNet+MLP Training and Evaluation Results}
+    \begin{tabular}{c|c|c|c|c}
+    \hline
+    \textbf{Epoch} & \textbf{Train Loss} & \textbf{Val Loss} & \textbf{Train Acc} & \textbf{Eval Acc} \\
+    \hline
+    1  & 0.3774 & 0.3646 & 0.8245 & 0.8288 \\
+    2  & 0.3679 & 0.3479 & 0.8292 & 0.8423 \\
+    3  & 0.3612 & 0.3627 & 0.8330 & 0.8430 \\
+    4  & 0.3572 & 0.3692 & 0.8352 & 0.8454 \\
+    5  & 0.3553 & 0.3795 & 0.8359 & 0.8458 \\
+    6  & 0.3527 & 0.3796 & 0.8366 & 0.8412 \\
+    7  & 0.3513 & 0.3609 & 0.8378 & 0.8409 \\
+    8  & 0.3501 & 0.3687 & 0.8378 & 0.8462 \\
+    9  & 0.3496 & 0.3891 & 0.8390 & 0.8468 \\
+    10 & 0.3478 & 0.3567 & 0.8383 & 0.8473 \\
+    11 & 0.3478 & 0.3506 & 0.8386 & 0.8485 \\
+    12 & 0.3465 & 0.3887 & 0.8389 & \bf{0.8494} \\
+    13 & 0.3462 & 0.3622 & 0.8394 & 0.8470 \\
+    14 & 0.3455 & 0.3858 & 0.8403 & 0.8492 \\
+    15 & 0.3447 & 0.3608 & 0.8399 & 0.8458 \\
+    16 & 0.3442 & 0.3600 & 0.8411 & 0.8419 \\
+    17 & 0.3430 & 0.3658 & 0.8409 & 0.8486 \\
+    18 & 0.3433 & 0.3819 & 0.8411 & 0.8476 \\
+    19 & 0.3424 & 0.3833 & 0.8415 & 0.8431 \\
+    20 & 0.3416 & 0.3694 & 0.8410 & 0.8475 \\
+    \hline
+    \end{tabular}
+    \end{table}
+    
+
+
+
+\begin{comment}
+
+Training samples: 162079, Validation samples: 20259
+Number of batches per epoch (training): 317
+Number of batches per epoch (validation): 40
+Rank 0: Starting training...
+Epoch [1/20], Train Loss: 0.3505, Val Loss: 0.3326, Train Acc: 0.8343, Val Acc: 0.8409
+Model saved to ../trained/Combined_models/combined_model_epoch_1.pth
+Epoch [2/20], Train Loss: 0.3317, Val Loss: 0.3309, Train Acc: 0.8429, Val Acc: 0.8406
+Model saved to ../trained/Combined_models/combined_model_epoch_2.pth
+Epoch [3/20], Train Loss: 0.3272, Val Loss: 0.3303, Train Acc: 0.8453, Val Acc: 0.8423
+Model saved to ../trained/Combined_models/combined_model_epoch_3.pth
+Epoch [4/20], Train Loss: 0.3256, Val Loss: 0.3254, Train Acc: 0.8468, Val Acc: 0.8486
+Model saved to ../trained/Combined_models/combined_model_epoch_4.pth
+Epoch [5/20], Train Loss: 0.3244, Val Loss: 0.3329, Train Acc: 0.8466, Val Acc: 0.8441
+Model saved to ../trained/Combined_models/combined_model_epoch_5.pth
+Epoch [6/20], Train Loss: 0.3229, Val Loss: 0.3255, Train Acc: 0.8477, Val Acc: 0.8456
+Model saved to ../trained/Combined_models/combined_model_epoch_6.pth
+Epoch [7/20], Train Loss: 0.3213, Val Loss: 0.3248, Train Acc: 0.8483, Val Acc: 0.8452
+Model saved to ../trained/Combined_models/combined_model_epoch_7.pth
+Epoch [8/20], Train Loss: 0.3205, Val Loss: 0.3249, Train Acc: 0.8484, Val Acc: 0.8456
+Model saved to ../trained/Combined_models/combined_model_epoch_8.pth
+Epoch [9/20], Train Loss: 0.3198, Val Loss: 0.3289, Train Acc: 0.8494, Val Acc: 0.8441
+Model saved to ../trained/Combined_models/combined_model_epoch_9.pth
+Epoch [10/20], Train Loss: 0.3178, Val Loss: 0.3271, Train Acc: 0.8506, Val Acc: 0.8451
+Model saved to ../trained/Combined_models/combined_model_epoch_10.pth
+Epoch [11/20], Train Loss: 0.3166, Val Loss: 0.3282, Train Acc: 0.8513, Val Acc: 0.8463
+Model saved to ../trained/Combined_models/combined_model_epoch_11.pth
+Epoch [12/20], Train Loss: 0.3156, Val Loss: 0.3304, Train Acc: 0.8520, Val Acc: 0.8444
+Model saved to ../trained/Combined_models/combined_model_epoch_12.pth
+Epoch [13/20], Train Loss: 0.3142, Val Loss: 0.3313, Train Acc: 0.8529, Val Acc: 0.8440
+Model saved to ../trained/Combined_models/combined_model_epoch_13.pth
+Epoch [14/20], Train Loss: 0.3123, Val Loss: 0.3339, Train Acc: 0.8536, Val Acc: 0.8457
+Model saved to ../trained/Combined_models/combined_model_epoch_14.pth
+Epoch [15/20], Train Loss: 0.3098, Val Loss: 0.3303, Train Acc: 0.8546, Val Acc: 0.8440
+Model saved to ../trained/Combined_models/combined_model_epoch_15.pth
+Epoch [16/20], Train Loss: 0.3074, Val Loss: 0.3295, Train Acc: 0.8560, Val Acc: 0.8440
+Model saved to ../trained/Combined_models/combined_model_epoch_16.pth
+Epoch [17/20], Train Loss: 0.3049, Val Loss: 0.3367, Train Acc: 0.8579, Val Acc: 0.8443
+Model saved to ../trained/Combined_models/combined_model_epoch_17.pth
+Epoch [18/20], Train Loss: 0.3023, Val Loss: 0.3379, Train Acc: 0.8592, Val Acc: 0.8415
+Model saved to ../trained/Combined_models/combined_model_epoch_18.pth
+Epoch [19/20], Train Loss: 0.2988, Val Loss: 0.3425, Train Acc: 0.8609, Val Acc: 0.8382
+Model saved to ../trained/Combined_models/combined_model_epoch_19.pth
+Epoch [20/20], Train Loss: 0.2946, Val Loss: 0.3413, Train Acc: 0.8634, Val Acc: 0.8411
+Model saved to ../trained/Combined_models/combined_model_epoch_20.pth
+Final model saved to ../trained/Combined_models/combined_model_final.pth
+\end{comment}
+
+\end{document}
